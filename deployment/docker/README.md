@@ -42,7 +42,7 @@ The communication scheme between components is the following:
 
 To access Grafana use link [http://localhost:3000](http://localhost:3000).
 
-To access [vmui](https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html#vmui)
+To access [vmui](https://docs.victoriametrics.com/single-server-victoriametrics/#vmui)
 use link [http://localhost:8428/vmui](http://localhost:8428/vmui).
 
 To access `vmalert` use link [http://localhost:8428/vmalert](http://localhost:8428/vmalert/).
@@ -78,7 +78,7 @@ The communication scheme between components is the following:
 
 To access Grafana use link [http://localhost:3000](http://localhost:3000).
 
-To access [vmui](https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html#vmui)
+To access [vmui](https://docs.victoriametrics.com/single-server-victoriametrics/#vmui)
 use link [http://localhost:8427/select/0/prometheus/vmui/](http://localhost:8427/select/0/prometheus/vmui/).
 
 To access `vmalert` use link [http://localhost:8427/select/0/prometheus/vmalert/](http://localhost:8427/select/0/prometheus/vmalert/).
@@ -98,7 +98,7 @@ with listed targets for scraping.
 
 ## vmauth
 
-[vmauth](https://docs.victoriametrics.com/vmauth.html) acts as a [balancer](https://docs.victoriametrics.com/vmauth.html#load-balancing)
+[vmauth](https://docs.victoriametrics.com/vmauth/) acts as a [balancer](https://docs.victoriametrics.com/vmauth/#load-balancing)
 to spread the load across `vmselect`'s. [Grafana](#grafana) and [vmalert](#vmalert) use vmauth for read queries.
 vmauth config is available [here](ttps://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-cluster.yml)
 
@@ -151,20 +151,22 @@ make docker-cluster-vm-datasource-down # shutdown cluster
 ## Alerts
 
 See below a list of recommended alerting rules for various VictoriaMetrics components for running in production. 
-Some of the alerting rules thresholds are just recommendations and could require an adjustment. The list
-of alerting rules is the following:
+Some alerting rules thresholds are just recommendations and could require an adjustment. 
+The list of alerting rules is the following:
 * [alerts-health.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts-health.yml):
   alerting rules related to all VictoriaMetrics components for tracking their "health" state; 
 * [alerts.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts.yml):
-  alerting rules related to [single-server VictoriaMetrics](https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html) installation;
+  alerting rules related to [single-server VictoriaMetrics](https://docs.victoriametrics.com/single-server-victoriametrics/) installation;
 * [alerts-cluster.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts-cluster.yml):
-  alerting rules related to [cluster version of VictoriaMetrics](https://docs.victoriametrics.com/Cluster-VictoriaMetrics.html);
+  alerting rules related to [cluster version of VictoriaMetrics](https://docs.victoriametrics.com/cluster-victoriametrics/);
 * [alerts-vmagent.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts-vmagent.yml):
-  alerting rules related to [vmagent](https://docs.victoriametrics.com/vmagent.html) component;
+  alerting rules related to [vmagent](https://docs.victoriametrics.com/vmagent/) component;
 * [alerts-vmalert.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts-vmalert.yml):
-  alerting rules related to [vmalert](https://docs.victoriametrics.com/vmalert.html) component;
+  alerting rules related to [vmalert](https://docs.victoriametrics.com/vmalert/) component;
+* [alerts-vmauth.yml](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/alerts-vmauth.yml):
+  alerting rules related to [vmauth](https://docs.victoriametrics.com/vmauth/) component;
 
-Please, also see [how to monitor](https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html#monitoring) 
+Please, also see [how to monitor](https://docs.victoriametrics.com/single-server-victoriametrics/#monitoring) 
 VictoriaMetrics installations.
 
 ## VictoriaLogs server
@@ -185,7 +187,7 @@ To access Grafana use link [http://localhost:3000](http://localhost:3000).
 To access [VictoriaLogs UI](https://docs.victoriametrics.com/victorialogs/querying/#web-ui)
 use link [http://localhost:9428/select/vmui](http://localhost:9428/select/vmui).
 
-Please, also see [how to monitor](https://docs.victoriametrics.com/VictoriaLogs/#monitoring) 
+Please, also see [how to monitor](https://docs.victoriametrics.com/victorialogs/#monitoring) 
 VictoriaLogs installations.
 
 To shutdown environment execute the following command:
@@ -199,4 +201,4 @@ Please see more examples on integration of VictoriaLogs with other log shippers 
 * [fluentbit-docker](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/master/deployment/docker/victorialogs/fluentbit-docker) 
 * [logstash](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/master/deployment/docker/victorialogs/logstash) 
 * [promtail](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/master/deployment/docker/victorialogs/promtail) 
-* [vector-docker](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/master/deployment/docker/victorialogs/vector-docker) 
+* [vector-docker](https://github.com/VictoriaMetrics/VictoriaMetrics/tree/master/deployment/docker/victorialogs/vector-docker)

@@ -1,13 +1,13 @@
 ---
-sort: 5
-weight: 5
+sort: 6
+weight: 6
 title: User Management in Managed VictoriaMetrics
 menu:
   docs:
     parent: "managed"
-    weight: 5
+    weight: 6
 aliases:
-- /managed-victoriametrics/user-managment.html
+- /managed-victoriametrics/user-management.html
 ---
 # User Management in Managed VictoriaMetrics 
 
@@ -182,7 +182,7 @@ To confirm the deletion of a user, you will need to re-enter their email address
 
 You will be redirected to the main page with a success or error message
 
-<img src="user_management_delete_sucess.webp" >
+<img src="user_management_delete_success.webp" >
 
 ## How to resend invitation
 

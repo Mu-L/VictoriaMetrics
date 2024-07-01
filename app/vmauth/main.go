@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,14 +20,13 @@ import (
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/buildinfo"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/encoding"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/envflag"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/flagutil"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fs/fscore"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/httpserver"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/netutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/procutil"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promauth"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/pushmetrics"
 )
 
@@ -40,22 +37,30 @@ var (
 		"With enabled proxy protocol http server cannot serve regular /metrics endpoint. Use -pushmetrics.url for metrics pushing")
 	maxIdleConnsPerBackend = flag.Int("maxIdleConnsPerBackend", 100, "The maximum number of idle connections vmauth can open per each backend host. "+
 		"See also -maxConcurrentRequests")
+	idleConnTimeout = flag.Duration("idleConnTimeout", 50*time.Second, `Defines a duration for idle (keep-alive connections) to exist.
+    Consider setting this value less than "-http.idleConnTimeout". It must prevent possible "write: broken pipe" and "read: connection reset by peer" errors.`)
 	responseTimeout       = flag.Duration("responseTimeout", 5*time.Minute, "The timeout for receiving a response from backend")
 	maxConcurrentRequests = flag.Int("maxConcurrentRequests", 1000, "The maximum number of concurrent requests vmauth can process. Other requests are rejected with "+
 		"'429 Too Many Requests' http status code. See also -maxConcurrentPerUserRequests and -maxIdleConnsPerBackend command-line options")
 	maxConcurrentPerUserRequests = flag.Int("maxConcurrentPerUserRequests", 300, "The maximum number of concurrent requests vmauth can process per each configured user. "+
 		"Other requests are rejected with '429 Too Many Requests' http status code. See also -maxConcurrentRequests command-line option and max_concurrent_requests option "+
 		"in per-user config")
-	reloadAuthKey        = flagutil.NewPassword("reloadAuthKey", "Auth key for /-/reload http endpoint. It must be passed as authKey=...")
+	reloadAuthKey        = flagutil.NewPassword("reloadAuthKey", "Auth key for /-/reload http endpoint. It must be passed via authKey query arg. It overrides httpAuth.* settings.")
 	logInvalidAuthTokens = flag.Bool("logInvalidAuthTokens", false, "Whether to log requests with invalid auth tokens. "+
 		`Such requests are always counted at vmauth_http_request_errors_total{reason="invalid_auth_token"} metric, which is exposed at /metrics page`)
 	failTimeout               = flag.Duration("failTimeout", 3*time.Second, "Sets a delay period for load balancing to skip a malfunctioning backend")
 	maxRequestBodySizeToRetry = flagutil.NewBytes("maxRequestBodySizeToRetry", 16*1024, "The maximum request body size, which can be cached and re-tried at other backends. "+
 		"Bigger values may require more memory")
 	backendTLSInsecureSkipVerify = flag.Bool("backend.tlsInsecureSkipVerify", false, "Whether to skip TLS verification when connecting to backends over HTTPS. "+
-		"See https://docs.victoriametrics.com/vmauth.html#backend-tls-setup")
+		"See https://docs.victoriametrics.com/vmauth/#backend-tls-setup")
 	backendTLSCAFile = flag.String("backend.TLSCAFile", "", "Optional path to TLS root CA file, which is used for TLS verification when connecting to backends over HTTPS. "+
-		"See https://docs.victoriametrics.com/vmauth.html#backend-tls-setup")
+		"See https://docs.victoriametrics.com/vmauth/#backend-tls-setup")
+	backendTLSCertFile = flag.String("backend.TLSCertFile", "", "Optional path to TLS client certificate file, which must be sent to HTTPS backend. "+
+		"See https://docs.victoriametrics.com/vmauth/#backend-tls-setup")
+	backendTLSKeyFile = flag.String("backend.TLSKeyFile", "", "Optional path to TLS client key file, which must be sent to HTTPS backend. "+
+		"See https://docs.victoriametrics.com/vmauth/#backend-tls-setup")
+	backendTLSServerName = flag.String("backend.TLSServerName", "", "Optional TLS ServerName, which must be sent to HTTPS backend. "+
+		"See https://docs.victoriametrics.com/vmauth/#backend-tls-setup")
 )
 
 func main() {
@@ -161,20 +166,12 @@ func processUserRequest(w http.ResponseWriter, r *http.Request, ui *UserInfo) {
 		if err := ui.beginConcurrencyLimit(); err != nil {
 			handleConcurrencyLimitError(w, r, err)
 			<-concurrencyLimitCh
-
-			// Requests failed because of concurrency limit must be counted as errors,
-			// since this usually means the backend cannot keep up with the current load.
-			ui.backendErrors.Inc()
 			return
 		}
 	default:
 		concurrentRequestsLimitReached.Inc()
 		err := fmt.Errorf("cannot serve more than -maxConcurrentRequests=%d concurrent requests", cap(concurrencyLimitCh))
 		handleConcurrencyLimitError(w, r, err)
-
-		// Requests failed because of concurrency limit must be counted as errors,
-		// since this usually means the backend cannot keep up with the current load.
-		ui.backendErrors.Inc()
 		return
 	}
 	processRequest(w, r, ui)
@@ -204,10 +201,8 @@ func processRequest(w http.ResponseWriter, r *http.Request, ui *UserInfo) {
 		isDefault = true
 	}
 	maxAttempts := up.getBackendsCount()
-	if maxAttempts > 1 {
-		r.Body = &readTrackingBody{
-			r: r.Body,
-		}
+	r.Body = &readTrackingBody{
+		r: r.Body,
 	}
 	for i := 0; i < maxAttempts; i++ {
 		bu := up.getBackendURL()
@@ -240,7 +235,7 @@ func tryProcessingRequest(w http.ResponseWriter, r *http.Request, targetURL *url
 	req := sanitizeRequestHeaders(r)
 	req.URL = targetURL
 
-	if req.URL.Scheme == "https" {
+	if req.URL.Scheme == "https" || ui.overrideHostHeader {
 		// Override req.Host only for https requests, since https server verifies hostnames during TLS handshake,
 		// so it expects the targetURL.Host in the request.
 		// There is no need in overriding the req.Host for http requests, since it is expected that backend server
@@ -248,8 +243,10 @@ func tryProcessingRequest(w http.ResponseWriter, r *http.Request, targetURL *url
 		req.Host = targetURL.Host
 	}
 	updateHeadersByConfig(req.Header, hc.RequestHeaders)
-	res, err := ui.httpTransport.RoundTrip(req)
+	var trivialRetries int
 	rtb, rtbOK := req.Body.(*readTrackingBody)
+again:
+	res, err := ui.rt.RoundTrip(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			// Do not retry canceled or timed out requests
@@ -271,6 +268,12 @@ func tryProcessingRequest(w http.ResponseWriter, r *http.Request, targetURL *url
 			httpserver.Errorf(w, r, "%s", err)
 			ui.backendErrors.Inc()
 			return true
+		}
+		// one time retry trivial network errors, such as proxy idle timeout misconfiguration
+		// or socket close by OS
+		if (netutil.IsTrivialNetworkError(err) || errors.Is(err, io.EOF)) && trivialRetries < 1 {
+			trivialRetries++
+			goto again
 		}
 		// Retry the request if its body wasn't read yet. This usually means that the backend isn't reachable.
 		remoteAddr := httpserver.GetQuotedRemoteAddr(r)
@@ -331,7 +334,7 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-func updateHeadersByConfig(headers http.Header, config []Header) {
+func updateHeadersByConfig(headers http.Header, config []*Header) {
 	for _, h := range config {
 		if h.Value == "" {
 			headers.Del(h.Name)
@@ -400,79 +403,54 @@ var (
 	missingRouteRequests     = metrics.NewCounter(`vmauth_http_request_errors_total{reason="missing_route"}`)
 )
 
-func getTransport(insecureSkipVerifyP *bool, caFile string) (*http.Transport, error) {
-	if insecureSkipVerifyP == nil {
-		insecureSkipVerifyP = backendTLSInsecureSkipVerify
+func newRoundTripper(caFileOpt, certFileOpt, keyFileOpt, serverNameOpt string, insecureSkipVerifyP *bool) (http.RoundTripper, error) {
+	caFile := *backendTLSCAFile
+	if caFileOpt != "" {
+		caFile = caFileOpt
 	}
-	insecureSkipVerify := *insecureSkipVerifyP
-	if caFile == "" {
-		caFile = *backendTLSCAFile
+	certFile := *backendTLSCertFile
+	if certFileOpt != "" {
+		certFile = certFileOpt
+	}
+	keyFile := *backendTLSKeyFile
+	if keyFileOpt != "" {
+		keyFile = keyFileOpt
+	}
+	serverName := *backendTLSServerName
+	if serverNameOpt != "" {
+		serverName = serverNameOpt
+	}
+	insecureSkipVerify := *backendTLSInsecureSkipVerify
+	if p := insecureSkipVerifyP; p != nil {
+		insecureSkipVerify = *p
+	}
+	opts := &promauth.Options{
+		TLSConfig: &promauth.TLSConfig{
+			CAFile:             caFile,
+			CertFile:           certFile,
+			KeyFile:            keyFile,
+			ServerName:         serverName,
+			InsecureSkipVerify: insecureSkipVerify,
+		},
+	}
+	cfg, err := opts.NewConfig()
+	if err != nil {
+		return nil, fmt.Errorf("cannot initialize promauth.Config: %w", err)
 	}
 
-	bb := bbPool.Get()
-	defer bbPool.Put(bb)
-
-	bb.B = appendTransportKey(bb.B[:0], insecureSkipVerify, caFile)
-
-	transportMapLock.Lock()
-	defer transportMapLock.Unlock()
-
-	tr := transportMap[string(bb.B)]
-	if tr == nil {
-		trLocal, err := newTransport(insecureSkipVerify, caFile)
-		if err != nil {
-			return nil, err
-		}
-		transportMap[string(bb.B)] = trLocal
-		tr = trLocal
-	}
-
-	return tr, nil
-}
-
-var (
-	transportMap     = make(map[string]*http.Transport)
-	transportMapLock sync.Mutex
-)
-
-func appendTransportKey(dst []byte, insecureSkipVerify bool, caFile string) []byte {
-	dst = encoding.MarshalBool(dst, insecureSkipVerify)
-	dst = encoding.MarshalBytes(dst, bytesutil.ToUnsafeBytes(caFile))
-	return dst
-}
-
-var bbPool bytesutil.ByteBufferPool
-
-func newTransport(insecureSkipVerify bool, caFile string) (*http.Transport, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = *responseTimeout
 	// Automatic compression must be disabled in order to fix https://github.com/VictoriaMetrics/VictoriaMetrics/issues/535
 	tr.DisableCompression = true
+	tr.IdleConnTimeout = *idleConnTimeout
 	tr.MaxIdleConnsPerHost = *maxIdleConnsPerBackend
 	if tr.MaxIdleConns != 0 && tr.MaxIdleConns < tr.MaxIdleConnsPerHost {
 		tr.MaxIdleConns = tr.MaxIdleConnsPerHost
 	}
-	tlsCfg := tr.TLSClientConfig
-	if tlsCfg == nil {
-		tlsCfg = &tls.Config{}
-		tr.TLSClientConfig = tlsCfg
-	}
-	if insecureSkipVerify || caFile != "" {
-		tlsCfg.ClientSessionCache = tls.NewLRUClientSessionCache(0)
-		tlsCfg.InsecureSkipVerify = insecureSkipVerify
-		if caFile != "" {
-			data, err := fscore.ReadFileOrHTTP(caFile)
-			if err != nil {
-				return nil, fmt.Errorf("cannot read tls_ca_file: %w", err)
-			}
-			rootCA := x509.NewCertPool()
-			if !rootCA.AppendCertsFromPEM(data) {
-				return nil, fmt.Errorf("cannot parse data read from tls_ca_file %q", caFile)
-			}
-			tlsCfg.RootCAs = rootCA
-		}
-	}
-	return tr, nil
+	tr.DialContext = netutil.DialMaybeSRV
+
+	rt := cfg.NewRoundTripper(tr)
+	return rt, nil
 }
 
 var (
@@ -496,7 +474,7 @@ func usage() {
 	const s = `
 vmauth authenticates and authorizes incoming requests and proxies them to VictoriaMetrics.
 
-See the docs at https://docs.victoriametrics.com/vmauth.html .
+See the docs at https://docs.victoriametrics.com/vmauth/ .
 `
 	flagutil.Usage(s)
 }

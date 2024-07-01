@@ -34,9 +34,10 @@ var (
 	tlsEnable = flagutil.NewArrayBool("tls", "Whether to enable TLS for incoming HTTP requests at the given -httpListenAddr (aka https). -tlsCertFile and -tlsKeyFile must be set if -tls is set. "+
 		"See also -mtls")
 	tlsCertFile = flagutil.NewArrayString("tlsCertFile", "Path to file with TLS certificate for the corresponding -httpListenAddr if -tls is set. "+
-		"Prefer ECDSA certs instead of RSA certs as RSA certs are slower. The provided certificate file is automatically re-read every second, so it can be dynamically updated")
+		"Prefer ECDSA certs instead of RSA certs as RSA certs are slower. The provided certificate file is automatically re-read every second, so it can be dynamically updated. "+
+		"See also -tlsAutocertHosts")
 	tlsKeyFile = flagutil.NewArrayString("tlsKeyFile", "Path to file with TLS key for the corresponding -httpListenAddr if -tls is set. "+
-		"The provided key file is automatically re-read every second, so it can be dynamically updated")
+		"The provided key file is automatically re-read every second, so it can be dynamically updated. See also -tlsAutocertHosts")
 	tlsCipherSuites = flagutil.NewArrayString("tlsCipherSuites", "Optional list of TLS cipher suites for incoming requests over HTTPS if -tls is set. See the list of supported cipher suites at https://pkg.go.dev/crypto/tls#pkg-constants")
 	tlsMinVersion   = flagutil.NewArrayString("tlsMinVersion", "Optional minimum TLS version to use for the corresponding -httpListenAddr if -tls is set. "+
 		"Supported values: TLS10, TLS11, TLS12, TLS13")
@@ -395,6 +396,18 @@ func handlerWrapper(s *server, w http.ResponseWriter, r *http.Request, rh Reques
 		// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/4128
 		fmt.Fprintf(w, "User-agent: *\nDisallow: /\n")
 		return
+	case "/config", "/-/reload":
+		// only some components (vmagent, vmalert, etc.) support these handlers
+		// these components are responsible for CheckAuthFlag call
+		// see https://github.com/VictoriaMetrics/VictoriaMetrics/issues/6329
+		w = &responseWriterWithAbort{
+			ResponseWriter: w,
+		}
+		if !rh(w, r) {
+			Errorf(w, r, "unsupported path requested: %q", r.URL.Path)
+			unsupportedRequestErrors.Inc()
+		}
+		return
 	default:
 		if strings.HasPrefix(r.URL.Path, "/debug/pprof/") {
 			pprofRequests.Inc()
@@ -555,6 +568,21 @@ func (rwa *responseWriterWithAbort) WriteHeader(statusCode int) {
 	rwa.sentHeaders = true
 }
 
+// Flush implements net/http.Flusher interface
+func (rwa *responseWriterWithAbort) Flush() {
+	if rwa.aborted {
+		return
+	}
+	if !rwa.sentHeaders {
+		rwa.sentHeaders = true
+	}
+	flusher, ok := rwa.ResponseWriter.(http.Flusher)
+	if !ok {
+		logger.Panicf("BUG: it is expected http.ResponseWriter (%T) supports http.Flusher interface", rwa.ResponseWriter)
+	}
+	flusher.Flush()
+}
+
 // abort aborts the client connection associated with rwa.
 //
 // The last http chunk in the response stream is intentionally written incorrectly,
@@ -605,6 +633,7 @@ func Errorf(w http.ResponseWriter, r *http.Request, format string, args ...inter
 			break
 		}
 	}
+
 	if rwa, ok := w.(*responseWriterWithAbort); ok && rwa.sentHeaders {
 		// HTTP status code has been already sent to client, so it cannot be sent again.
 		// Just write errStr to the response and abort the client connection, so the client could notice the error.

@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/compat";
-import { StateUpdater } from "preact/hooks";
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from "preact/compat";
 import { getQueryRangeUrl, getQueryUrl } from "../api/query-range";
 import { useAppState } from "../state/common/StateContext";
 import { InstantMetricResult, MetricBase, MetricResult, QueryStats } from "../api/types";
@@ -13,6 +12,7 @@ import { useCustomPanelState } from "../state/customPanel/CustomPanelStateContex
 import { isHistogramData } from "../utils/metric";
 import { useGraphState } from "../state/graph/GraphStateContext";
 import { getStepFromDuration } from "../utils/time";
+import { AppType } from "../types/appType";
 
 interface FetchQueryParams {
   predefinedQuery?: string[]
@@ -30,7 +30,7 @@ interface FetchQueryReturn {
   liveData?: InstantMetricResult[],
   error?: ErrorTypes | string,
   queryErrors: (ErrorTypes | string)[],
-  setQueryErrors: StateUpdater<string[]>,
+  setQueryErrors: Dispatch<SetStateAction<string[]>>,
   queryStats: QueryStats[],
   warning?: string,
   traces?: Trace[],
@@ -47,13 +47,15 @@ interface FetchDataParams {
   hideQuery?: number[]
 }
 
+const isAnomalyUI = AppType.anomaly === process.env.REACT_APP_TYPE;
+
 export const useFetchQuery = ({
   predefinedQuery,
   visible,
   display,
   customStep,
   hideQuery,
-  showAllSeries
+  showAllSeries,
 }: FetchQueryParams): FetchQueryReturn => {
   const { query } = useQueryState();
   const { period } = useTimeState();
@@ -124,7 +126,7 @@ export const useFetchQuery = ({
             tempTraces.push(trace);
           }
 
-          isHistogramResult = isDisplayChart && isHistogramData(resp.data.result);
+          isHistogramResult = !isAnomalyUI && isDisplayChart && isHistogramData(resp.data.result);
           seriesLimit = isHistogramResult ? Infinity : defaultLimit;
           const freeTempSize = seriesLimit - tempData.length;
           resp.data.result.slice(0, freeTempSize).forEach((d: MetricBase) => {
@@ -150,9 +152,17 @@ export const useFetchQuery = ({
       setTraces(tempTraces);
       setIsHistogram(prev => totalLength ? isHistogramResult : prev);
     } catch (e) {
-      if (e instanceof Error && e.name !== "AbortError") {
-        setError(`${e.name}: ${e.message}`);
+      const error = e as Error;
+      if (error.name === "AbortError") {
+        // Aborts are expected, don't show an error for them.
+        return;
       }
+      const helperText = "Please check your serverURL settings and confirm server availability.";
+      let text = `Error executing query: ${error.message}. ${helperText}`;
+      if (error.message === "Unexpected end of JSON input") {
+        text += "\nAdditionally, this error can occur if the server response is too large to process. Apply more specific filters to reduce the data volume.";
+      }
+      setError(text);
     }
     setIsLoading(false);
   };

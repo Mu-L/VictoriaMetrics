@@ -19,7 +19,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/procutil"
 )
 
-var reloadAuthKey = flagutil.NewPassword("reloadAuthKey", "Auth key for /-/reload http endpoint. It must be passed as authKey=...")
+var reloadAuthKey = flagutil.NewPassword("reloadAuthKey", "Auth key for /-/reload http endpoint. It must be passed via authKey query arg. It overrides httpAuth.* settings.")
 
 var (
 	apiLinks = [][2]string{
@@ -30,16 +30,16 @@ var (
 		{fmt.Sprintf("api/v1/alert?%s=<int>&%s=<int>", paramGroupID, paramAlertID), "get alert status by group and alert ID"},
 	}
 	systemLinks = [][2]string{
-		{"/flags", "command-line flags"},
-		{"/metrics", "list of application metrics"},
-		{"/-/reload", "reload configuration"},
+		{"flags", "command-line flags"},
+		{"metrics", "list of application metrics"},
+		{"-/reload", "reload configuration"},
 	}
 	navItems = []tpl.NavItem{
 		{Name: "vmalert", Url: "."},
 		{Name: "Groups", Url: "groups"},
 		{Name: "Alerts", Url: "alerts"},
 		{Name: "Notifiers", Url: "notifiers"},
-		{Name: "Docs", Url: "https://docs.victoriametrics.com/vmalert.html"},
+		{Name: "Docs", Url: "https://docs.victoriametrics.com/vmalert/"},
 	}
 )
 
@@ -176,7 +176,6 @@ func (rh *requestHandler) handler(w http.ResponseWriter, r *http.Request) bool {
 		return true
 
 	default:
-		httpserver.Errorf(w, r, "unsupported path requested: %q ", r.URL.Path)
 		return false
 	}
 }

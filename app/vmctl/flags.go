@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	globalSilent  = "s"
-	globalVerbose = "verbose"
+	globalSilent             = "s"
+	globalVerbose            = "verbose"
+	globalDisableProgressBar = "disable-progress-bar"
 )
 
 var (
@@ -26,6 +27,11 @@ var (
 			Value: false,
 			Usage: "Whether to enable verbosity in logs output.",
 		},
+		&cli.BoolFlag{
+			Name:  globalDisableProgressBar,
+			Value: false,
+			Usage: "Whether to disable progress bar during the import.",
+		},
 	}
 )
 
@@ -39,7 +45,6 @@ const (
 	vmBatchSize          = "vm-batch-size"
 	vmSignificantFigures = "vm-significant-figures"
 	vmRoundDigits        = "vm-round-digits"
-	vmDisableProgressBar = "vm-disable-progress-bar"
 	vmCertFile           = "vm-cert-file"
 	vmKeyFile            = "vm-key-file"
 	vmCAFile             = "vm-CA-file"
@@ -119,10 +124,6 @@ var (
 			Name: vmRateLimit,
 			Usage: "Optional data transfer rate limit in bytes per second.\n" +
 				"By default, the rate limit is disabled. It can be useful for limiting load on configured via '--vmAddr' destination.",
-		},
-		&cli.BoolFlag{
-			Name:  vmDisableProgressBar,
-			Usage: "Whether to disable progress bar per each worker during the import.",
 		},
 		&cli.StringFlag{
 			Name:  vmCertFile,
@@ -442,12 +443,12 @@ var (
 		},
 		&cli.StringFlag{
 			Name:     vmNativeFilterTimeStart,
-			Usage:    "The time filter may contain different timestamp formats. See more details here https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html#timestamp-formats",
+			Usage:    "The time filter may contain different timestamp formats. See more details here https://docs.victoriametrics.com/single-server-victoriametrics/#timestamp-formats",
 			Required: true,
 		},
 		&cli.StringFlag{
 			Name:  vmNativeFilterTimeEnd,
-			Usage: "The time filter may contain different timestamp formats. See more details here https://docs.victoriametrics.com/Single-server-VictoriaMetrics.html#timestamp-formats",
+			Usage: "The time filter may contain different timestamp formats. See more details here https://docs.victoriametrics.com/single-server-victoriametrics/#timestamp-formats",
 		},
 		&cli.StringFlag{
 			Name: vmNativeStepInterval,
@@ -469,7 +470,7 @@ var (
 			Name: vmNativeSrcAddr,
 			Usage: "VictoriaMetrics address to perform export from. \n" +
 				" Should be the same as --httpListenAddr value for single-node version or vmselect component." +
-				" If exporting from cluster version see https://docs.victoriametrics.com/Cluster-VictoriaMetrics.html#url-format",
+				" If exporting from cluster version see https://docs.victoriametrics.com/cluster-victoriametrics/#url-format",
 			Required: true,
 		},
 		&cli.StringFlag{
@@ -518,7 +519,7 @@ var (
 			Name: vmNativeDstAddr,
 			Usage: "VictoriaMetrics address to perform import to. \n" +
 				" Should be the same as --httpListenAddr value for single-node version or vminsert component." +
-				" If importing into cluster version see https://docs.victoriametrics.com/Cluster-VictoriaMetrics.html#url-format",
+				" If importing into cluster version see https://docs.victoriametrics.com/cluster-victoriametrics/#url-format",
 			Required: true,
 		},
 		&cli.StringFlag{

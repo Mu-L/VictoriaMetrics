@@ -1,6 +1,7 @@
 package streamaggr
 
 import (
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -15,7 +16,6 @@ import (
 // Deduplicator deduplicates samples per each time series.
 type Deduplicator struct {
 	da *dedupAggr
-	lc promutils.LabelsCompressor
 
 	dropLabels []string
 
@@ -36,10 +36,9 @@ type Deduplicator struct {
 // Common case is to drop `replica`-like labels from samples received from HA datasources.
 //
 // MustStop must be called on the returned deduplicator in order to free up occupied resources.
-func NewDeduplicator(pushFunc PushFunc, dedupInterval time.Duration, dropLabels []string) *Deduplicator {
+func NewDeduplicator(pushFunc PushFunc, dedupInterval time.Duration, dropLabels []string, alias string) *Deduplicator {
 	d := &Deduplicator{
-		da: newDedupAggr(),
-
+		da:         newDedupAggr(),
 		dropLabels: dropLabels,
 
 		stopCh: make(chan struct{}),
@@ -47,22 +46,17 @@ func NewDeduplicator(pushFunc PushFunc, dedupInterval time.Duration, dropLabels 
 	}
 
 	ms := d.ms
-	_ = ms.NewGauge(`vm_streamaggr_dedup_state_size_bytes`, func() float64 {
+
+	metricLabels := fmt.Sprintf(`url=%q`, alias)
+	_ = ms.NewGauge(fmt.Sprintf(`vm_streamaggr_dedup_state_size_bytes{%s}`, metricLabels), func() float64 {
 		return float64(d.da.sizeBytes())
 	})
-	_ = ms.NewGauge(`vm_streamaggr_dedup_state_items_count`, func() float64 {
+	_ = ms.NewGauge(fmt.Sprintf(`vm_streamaggr_dedup_state_items_count{%s}`, metricLabels), func() float64 {
 		return float64(d.da.itemsCount())
 	})
 
-	_ = ms.NewGauge(`vm_streamaggr_labels_compressor_size_bytes`, func() float64 {
-		return float64(d.lc.SizeBytes())
-	})
-	_ = ms.NewGauge(`vm_streamaggr_labels_compressor_items_count`, func() float64 {
-		return float64(d.lc.ItemsCount())
-	})
-
-	d.dedupFlushDuration = ms.GetOrCreateHistogram(`vm_streamaggr_dedup_flush_duration_seconds`)
-	d.dedupFlushTimeouts = ms.GetOrCreateCounter(`vm_streamaggr_dedup_flush_timeouts_total`)
+	d.dedupFlushDuration = ms.GetOrCreateHistogram(fmt.Sprintf(`vm_streamaggr_dedup_flush_duration_seconds{%s}`, metricLabels))
+	d.dedupFlushTimeouts = ms.GetOrCreateCounter(fmt.Sprintf(`vm_streamaggr_dedup_flush_timeouts_total{%s}`, metricLabels))
 
 	metrics.RegisterSet(ms)
 
@@ -103,8 +97,9 @@ func (d *Deduplicator) Push(tss []prompbmarshal.TimeSeries) {
 		}
 		labels.Sort()
 
-		buf = d.lc.Compress(buf[:0], labels.Labels)
-		key := bytesutil.InternBytes(buf)
+		bufLen := len(buf)
+		buf = lc.Compress(buf, labels.Labels)
+		key := bytesutil.ToUnsafeString(buf[bufLen:])
 		for _, s := range ts.Samples {
 			pss = append(pss, pushSample{
 				key:       key,
@@ -155,7 +150,7 @@ func (d *Deduplicator) flush(pushFunc PushFunc, dedupInterval time.Duration) {
 		samples := ctx.samples
 		for _, ps := range pss {
 			labelsLen := len(labels)
-			labels = decompressLabels(labels, &d.lc, ps.key)
+			labels = decompressLabels(labels, ps.key)
 
 			samplesLen := len(samples)
 			samples = append(samples, prompbmarshal.Sample{
@@ -174,7 +169,7 @@ func (d *Deduplicator) flush(pushFunc PushFunc, dedupInterval time.Duration) {
 		ctx.labels = labels
 		ctx.samples = samples
 		putDeduplicatorFlushCtx(ctx)
-	}, true)
+	})
 
 	duration := time.Since(startTime)
 	d.dedupFlushDuration.Update(duration.Seconds())

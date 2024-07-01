@@ -15,7 +15,7 @@ import (
 //
 // It falls back to sending data via file when readers don't catch up with writers.
 type FastQueue struct {
-	// my protects the state of FastQueue.
+	// mu protects the state of FastQueue.
 	mu sync.Mutex
 
 	// cond is used for notifying blocked readers when new data has been added
@@ -63,7 +63,7 @@ func MustOpenFastQueue(path, name string, maxInmemoryBlocks int, maxPendingBytes
 		return float64(n)
 	})
 	pendingBytes := fq.GetPendingBytes()
-	logger.Infof("opened fast persistent queue at %q with maxInmemoryBlocks=%d, it contains %d pending bytes", path, maxInmemoryBlocks, pendingBytes)
+	logger.Infof("opened fast persistent queue at %q with maxInmemoryBlocks=%d isPQDisabled=%t, it contains %d pending bytes", path, maxInmemoryBlocks, isPQDisabled, pendingBytes)
 	return fq
 }
 

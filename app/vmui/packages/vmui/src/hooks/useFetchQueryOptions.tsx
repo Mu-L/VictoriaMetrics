@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useRef } from "preact/compat";
-import { StateUpdater } from "preact/hooks";
+import React, { useEffect, useState, useRef, Dispatch, SetStateAction } from "preact/compat";
 import { useAppState } from "../state/common/StateContext";
 import { AutocompleteOptions } from "../components/Main/Autocomplete/Autocomplete";
 import { LabelIcon, MetricIcon, ValueIcon } from "../components/Main/Icons";
@@ -21,7 +20,7 @@ enum TypeData {
 type FetchDataArgs = {
   value: string;
   urlSuffix: string;
-  setter: StateUpdater<AutocompleteOptions[]>;
+  setter: Dispatch<SetStateAction<AutocompleteOptions[]>>
   type: TypeData;
   params?: URLSearchParams;
 }
@@ -96,6 +95,7 @@ export const useFetchQueryOptions = ({ valueByContext, metric, label, context }:
       const cachedData = autocompleteCache.get(key);
       if (cachedData) {
         setter(processData(cachedData, type));
+        setLoading(false);
         return;
       }
       const response = await fetch(`${serverUrl}/api/v1/${urlSuffix}?${params}`, { signal });
@@ -104,13 +104,13 @@ export const useFetchQueryOptions = ({ valueByContext, metric, label, context }:
         setter(processData(data, type));
         queryDispatch({ type: "SET_AUTOCOMPLETE_CACHE", payload: { key, value: data } });
       }
+      setLoading(false);
     } catch (e) {
       if (e instanceof Error && e.name !== "AbortError") {
         queryDispatch({ type: "SET_AUTOCOMPLETE_CACHE", payload: { key, value: [] } });
+        setLoading(false);
         console.error(e);
       }
-    } finally {
-      setLoading(false);
     }
   };
 

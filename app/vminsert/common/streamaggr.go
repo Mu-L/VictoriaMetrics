@@ -20,20 +20,22 @@ import (
 
 var (
 	streamAggrConfig = flag.String("streamAggr.config", "", "Optional path to file with stream aggregation config. "+
-		"See https://docs.victoriametrics.com/stream-aggregation.html . "+
+		"See https://docs.victoriametrics.com/stream-aggregation/ . "+
 		"See also -streamAggr.keepInput, -streamAggr.dropInput and -streamAggr.dedupInterval")
 	streamAggrKeepInput = flag.Bool("streamAggr.keepInput", false, "Whether to keep all the input samples after the aggregation with -streamAggr.config. "+
 		"By default, only aggregated samples are dropped, while the remaining samples are stored in the database. "+
-		"See also -streamAggr.dropInput and https://docs.victoriametrics.com/stream-aggregation.html")
+		"See also -streamAggr.dropInput and https://docs.victoriametrics.com/stream-aggregation/")
 	streamAggrDropInput = flag.Bool("streamAggr.dropInput", false, "Whether to drop all the input samples after the aggregation with -streamAggr.config. "+
 		"By default, only aggregated samples are dropped, while the remaining samples are stored in the database. "+
-		"See also -streamAggr.keepInput and https://docs.victoriametrics.com/stream-aggregation.html")
+		"See also -streamAggr.keepInput and https://docs.victoriametrics.com/stream-aggregation/")
 	streamAggrDedupInterval = flag.Duration("streamAggr.dedupInterval", 0, "Input samples are de-duplicated with this interval before optional aggregation with -streamAggr.config . "+
-		"See also -streamAggr.dropInputLabels and -dedup.minScrapeInterval and https://docs.victoriametrics.com/stream-aggregation.html#deduplication")
+		"See also -streamAggr.dropInputLabels and -dedup.minScrapeInterval and https://docs.victoriametrics.com/stream-aggregation/#deduplication")
 	streamAggrDropInputLabels = flagutil.NewArrayString("streamAggr.dropInputLabels", "An optional list of labels to drop from samples "+
-		"before stream de-duplication and aggregation . See https://docs.victoriametrics.com/stream-aggregation.html#dropping-unneeded-labels")
+		"before stream de-duplication and aggregation . See https://docs.victoriametrics.com/stream-aggregation/#dropping-unneeded-labels")
+	streamAggrIgnoreFirstIntervals = flag.Int("streamAggr.ignoreFirstIntervals", 0, "Number of aggregation intervals to skip after the start. Increase this value if you observe incorrect aggregation results after restarts. It could be caused by receiving unordered delayed data from clients pushing data into the database. "+
+		"See https://docs.victoriametrics.com/stream-aggregation/#ignore-aggregation-intervals-on-start")
 	streamAggrIgnoreOldSamples = flag.Bool("streamAggr.ignoreOldSamples", false, "Whether to ignore input samples with old timestamps outside the current aggregation interval. "+
-		"See https://docs.victoriametrics.com/stream-aggregation.html#ignoring-old-samples")
+		"See https://docs.victoriametrics.com/stream-aggregation/#ignoring-old-samples")
 )
 
 var (
@@ -55,10 +57,12 @@ func CheckStreamAggrConfig() error {
 		return nil
 	}
 	pushNoop := func(_ []prompbmarshal.TimeSeries) {}
-	opts := &streamaggr.Options{
-		DedupInterval:    *streamAggrDedupInterval,
-		DropInputLabels:  *streamAggrDropInputLabels,
-		IgnoreOldSamples: *streamAggrIgnoreOldSamples,
+	opts := streamaggr.Options{
+		DedupInterval:        *streamAggrDedupInterval,
+		DropInputLabels:      *streamAggrDropInputLabels,
+		IgnoreOldSamples:     *streamAggrIgnoreOldSamples,
+		IgnoreFirstIntervals: *streamAggrIgnoreFirstIntervals,
+		Alias:                "global",
 	}
 	sas, err := streamaggr.LoadFromFile(*streamAggrConfig, pushNoop, opts)
 	if err != nil {
@@ -68,25 +72,33 @@ func CheckStreamAggrConfig() error {
 	return nil
 }
 
+// HasStreamAggrConfigured checks if streamAggr config provided
+func HasStreamAggrConfigured() bool {
+	return *streamAggrConfig != ""
+}
+
 // InitStreamAggr must be called after flag.Parse and before using the common package.
 //
 // MustStopStreamAggr must be called when stream aggr is no longer needed.
 func InitStreamAggr() {
 	saCfgReloaderStopCh = make(chan struct{})
+	rwctx := "global"
 
 	if *streamAggrConfig == "" {
 		if *streamAggrDedupInterval > 0 {
-			deduplicator = streamaggr.NewDeduplicator(pushAggregateSeries, *streamAggrDedupInterval, *streamAggrDropInputLabels)
+			deduplicator = streamaggr.NewDeduplicator(pushAggregateSeries, *streamAggrDedupInterval, *streamAggrDropInputLabels, rwctx)
 		}
 		return
 	}
 
 	sighupCh := procutil.NewSighupChan()
 
-	opts := &streamaggr.Options{
-		DedupInterval:    *streamAggrDedupInterval,
-		DropInputLabels:  *streamAggrDropInputLabels,
-		IgnoreOldSamples: *streamAggrIgnoreOldSamples,
+	opts := streamaggr.Options{
+		DedupInterval:        *streamAggrDedupInterval,
+		DropInputLabels:      *streamAggrDropInputLabels,
+		IgnoreOldSamples:     *streamAggrIgnoreOldSamples,
+		IgnoreFirstIntervals: *streamAggrIgnoreFirstIntervals,
+		Alias:                rwctx,
 	}
 	sas, err := streamaggr.LoadFromFile(*streamAggrConfig, pushAggregateSeries, opts)
 	if err != nil {
@@ -116,10 +128,12 @@ func reloadStreamAggrConfig() {
 	logger.Infof("reloading -streamAggr.config=%q", *streamAggrConfig)
 	saCfgReloads.Inc()
 
-	opts := &streamaggr.Options{
-		DedupInterval:    *streamAggrDedupInterval,
-		DropInputLabels:  *streamAggrDropInputLabels,
-		IgnoreOldSamples: *streamAggrIgnoreOldSamples,
+	opts := streamaggr.Options{
+		DedupInterval:        *streamAggrDedupInterval,
+		DropInputLabels:      *streamAggrDropInputLabels,
+		IgnoreOldSamples:     *streamAggrIgnoreOldSamples,
+		IgnoreFirstIntervals: *streamAggrIgnoreFirstIntervals,
+		Alias:                "global",
 	}
 	sasNew, err := streamaggr.LoadFromFile(*streamAggrConfig, pushAggregateSeries, opts)
 	if err != nil {
@@ -232,7 +246,7 @@ func (ctx *streamAggrCtx) push(mrs []storage.MetricRow, matchIdxs []byte) []byte
 	tss = tss[tssLen:]
 
 	sas := sasGlobal.Load()
-	if sas != nil {
+	if sas.IsEnabled() {
 		matchIdxs = sas.Push(tss, matchIdxs)
 	} else if deduplicator != nil {
 		matchIdxs = bytesutil.ResizeNoCopyMayOverallocate(matchIdxs, len(tss))

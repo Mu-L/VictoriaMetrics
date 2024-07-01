@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/fasttime"
 )
 
@@ -34,13 +35,13 @@ type totalAggrState struct {
 
 type totalStateValue struct {
 	mu             sync.Mutex
-	lastValues     map[string]lastValueState
+	lastValues     map[string]totalLastValueState
 	total          float64
 	deleteDeadline uint64
 	deleted        bool
 }
 
-type lastValueState struct {
+type totalLastValueState struct {
 	value          float64
 	timestamp      int64
 	deleteDeadline uint64
@@ -52,6 +53,9 @@ func newTotalAggrState(stalenessInterval time.Duration, resetTotalOnFlush, keepF
 	suffix := "total"
 	if resetTotalOnFlush {
 		suffix = "increase"
+	}
+	if !keepFirstSample {
+		suffix += "_prometheus"
 	}
 	return &totalAggrState{
 		suffix:                    suffix,
@@ -75,8 +79,9 @@ func (as *totalAggrState) pushSamples(samples []pushSample) {
 		if !ok {
 			// The entry is missing in the map. Try creating it.
 			v = &totalStateValue{
-				lastValues: make(map[string]lastValueState),
+				lastValues: make(map[string]totalLastValueState),
 			}
+			outputKey = bytesutil.InternString(outputKey)
 			vNew, loaded := as.m.LoadOrStore(outputKey, v)
 			if loaded {
 				// Use the entry created by a concurrent goroutine.
@@ -94,6 +99,7 @@ func (as *totalAggrState) pushSamples(samples []pushSample) {
 					sv.mu.Unlock()
 					continue
 				}
+
 				if s.value >= lv.value {
 					sv.total += s.value - lv.value
 				} else {
@@ -104,6 +110,8 @@ func (as *totalAggrState) pushSamples(samples []pushSample) {
 			lv.value = s.value
 			lv.timestamp = s.timestamp
 			lv.deleteDeadline = deleteDeadline
+
+			inputKey = bytesutil.InternString(inputKey)
 			sv.lastValues[inputKey] = lv
 			sv.deleteDeadline = deleteDeadline
 		}
@@ -116,8 +124,9 @@ func (as *totalAggrState) pushSamples(samples []pushSample) {
 	}
 }
 
-func (as *totalAggrState) removeOldEntries(currentTime uint64) {
+func (as *totalAggrState) removeOldEntries(ctx *flushCtx, currentTime uint64) {
 	m := &as.m
+	var staleInputSamples, staleOutputSamples int
 	m.Range(func(k, v interface{}) bool {
 		sv := v.(*totalStateValue)
 
@@ -126,12 +135,14 @@ func (as *totalAggrState) removeOldEntries(currentTime uint64) {
 		if deleted {
 			// Mark the current entry as deleted
 			sv.deleted = deleted
+			staleOutputSamples++
 		} else {
 			// Delete outdated entries in sv.lastValues
 			m := sv.lastValues
 			for k1, v1 := range m {
 				if currentTime > v1.deleteDeadline {
 					delete(m, k1)
+					staleInputSamples++
 				}
 			}
 		}
@@ -142,13 +153,15 @@ func (as *totalAggrState) removeOldEntries(currentTime uint64) {
 		}
 		return true
 	})
+	ctx.a.staleInputSamples[as.suffix].Add(staleInputSamples)
+	ctx.a.staleOutputSamples[as.suffix].Add(staleOutputSamples)
 }
 
 func (as *totalAggrState) flushState(ctx *flushCtx, resetState bool) {
 	currentTime := fasttime.UnixTimestamp()
 	currentTimeMsec := int64(currentTime) * 1000
 
-	as.removeOldEntries(currentTime)
+	as.removeOldEntries(ctx, currentTime)
 
 	m := &as.m
 	m.Range(func(k, v interface{}) bool {

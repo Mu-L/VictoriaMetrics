@@ -1,18 +1,24 @@
 # All these commands must run from repository root.
 
+DOCKER_REGISTRY ?= docker.io
 DOCKER_NAMESPACE ?= victoriametrics
 
-ROOT_IMAGE ?= alpine:3.19.1
-CERTS_IMAGE := alpine:3.19.1
+ROOT_IMAGE ?= alpine:3.20.0
+ROOT_IMAGE_SCRATCH ?= scratch
+SKIP_SCRATCH_BUILD ?= false
+CERTS_IMAGE := alpine:3.20.0
 
-GO_BUILDER_IMAGE := golang:1.22.2-alpine
+GO_BUILDER_IMAGE := golang:1.22.4-alpine
 BUILDER_IMAGE := local/builder:2.0.0-$(shell echo $(GO_BUILDER_IMAGE) | tr :/ __)-1
 BASE_IMAGE := local/base:1.1.4-$(shell echo $(ROOT_IMAGE) | tr :/ __)-$(shell echo $(CERTS_IMAGE) | tr :/ __)
 DOCKER ?= docker
+DOCKER_BUILD_OPTS ?=
 DOCKER_RUN ?= $(DOCKER) run
 DOCKER_BUILD ?= $(DOCKER) build
 DOCKER_COMPOSE ?= $(DOCKER) compose
 DOCKER_IMAGE_LS ?= $(DOCKER) image ls --format '{{.Repository}}:{{.Tag}}'
+TARGET_PLATFORM ?= linux/amd64,linux/arm,linux/arm64,linux/ppc64le,linux/386
+COMMA := ,
 
 package-base:
 	($(DOCKER_IMAGE_LS) | grep -q '$(BASE_IMAGE)$$') \
@@ -20,6 +26,7 @@ package-base:
 			--build-arg root_image=$(ROOT_IMAGE) \
 			--build-arg certs_image=$(CERTS_IMAGE) \
 			--tag $(BASE_IMAGE) \
+			$(DOCKER_BUILD_OPTS) \
 			deployment/docker/base
 
 package-builder:
@@ -27,6 +34,7 @@ package-builder:
 		|| $(DOCKER_BUILD) \
 			--build-arg go_builder_image=$(GO_BUILDER_IMAGE) \
 			--tag $(BUILDER_IMAGE) \
+			$(DOCKER_BUILD_OPTS) \
 			deployment/docker/builder
 
 app-via-docker: package-builder
@@ -60,66 +68,72 @@ app-via-docker-windows: package-builder
 			-o bin/$(APP_NAME)-windows$(APP_SUFFIX)-prod.exe $(PKG_PREFIX)/app/$(APP_NAME)
 
 package-via-docker: package-base
-	($(DOCKER_IMAGE_LS) | grep -q '$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)$$') || (\
+	($(DOCKER_IMAGE_LS) | grep -q '$(DOCKER_REGISTRY)/$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE)$$') || (\
 		$(MAKE) app-via-docker && \
 		$(DOCKER_BUILD) \
 			--build-arg src_binary=$(APP_NAME)$(APP_SUFFIX)-prod \
 			--build-arg base_image=$(BASE_IMAGE) \
-			--tag $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE) \
+			--tag $(DOCKER_REGISTRY)/$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE) \
 			-f app/$(APP_NAME)/deployment/Dockerfile bin)
 
 publish-via-docker:
-	$(MAKE_PARALLEL) app-via-docker-linux-amd64 \
-		app-via-docker-linux-arm \
-		app-via-docker-linux-arm64 \
-		app-via-docker-linux-ppc64le \
-		app-via-docker-linux-386
+	$(eval TARGET_PLATFORMS := $(subst $(COMMA), ,$(TARGET_PLATFORM)))
+	$(MAKE_PARALLEL) $(foreach PLATFORM,$(TARGET_PLATFORMS),app-via-docker-$(subst /,-,$(PLATFORM)))
 	$(DOCKER) buildx build \
-		--platform=linux/amd64,linux/arm,linux/arm64,linux/ppc64le,linux/386 \
+		--platform=$(TARGET_PLATFORM) \
 		--build-arg certs_image=$(CERTS_IMAGE) \
 		--build-arg root_image=$(ROOT_IMAGE) \
 		--build-arg APP_NAME=$(APP_NAME) \
-		--tag $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(RACE) \
-		--tag $(DOCKER_NAMESPACE)/$(APP_NAME):$(LATEST_TAG)$(RACE) \
+		--tag $(DOCKER_REGISTRY)/$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(RACE) \
+		--tag $(DOCKER_REGISTRY)/$(DOCKER_NAMESPACE)/$(APP_NAME):$(LATEST_TAG)$(RACE) \
 		-o type=image \
 		--provenance=false \
+		$(DOCKER_BUILD_OPTS) \
 		-f app/$(APP_NAME)/multiarch/Dockerfile \
 		--push \
 		bin
-	cd bin && rm -rf \
-		$(APP_NAME)-linux-amd64-prod \
-		$(APP_NAME)-linux-arm-prod \
-		$(APP_NAME)-linux-arm64-prod \
-		$(APP_NAME)-linux-ppc64le-prod \
-		$(APP_NAME)-linux-386-prod
+	$(if $(findstring $(SKIP_SCRATCH_BUILD),true),, \
+		$(DOCKER) buildx build \
+			--platform=$(TARGET_PLATFORM) \
+			--build-arg certs_image=$(CERTS_IMAGE) \
+			--build-arg root_image=$(ROOT_IMAGE_SCRATCH) \
+			--build-arg APP_NAME=$(APP_NAME) \
+			--tag $(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(RACE)-scratch \
+			--tag $(DOCKER_NAMESPACE)/$(APP_NAME):$(LATEST_TAG)$(RACE)-scratch \
+			-o type=image \
+			--provenance=false \
+			$(DOCKER_BUILD_OPTS) \
+			-f app/$(APP_NAME)/multiarch/Dockerfile \
+			--push \
+			bin)
+	cd bin && rm -rf $(foreach PLATFORM,$(TARGET_PLATFORMS),$(APP_NAME)-$(subst /,-,$(PLATFORM))-prod)
 
 run-via-docker: package-via-docker
 	$(DOCKER_RUN) -it --rm \
 		--user $(shell id -u):$(shell id -g) \
 		--net host \
 		$(DOCKER_OPTS) \
-		$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE) $(ARGS)
+		$(DOCKER_REGISTRY)/$(DOCKER_NAMESPACE)/$(APP_NAME):$(PKG_TAG)$(APP_SUFFIX)$(RACE) $(ARGS)
 
 app-via-docker-goos-goarch:
 	APP_SUFFIX='-$(GOOS)-$(GOARCH)' \
-	DOCKER_OPTS='--env CGO_ENABLED=$(CGO_ENABLED) --env GOOS=$(GOOS) --env GOARCH=$(GOARCH)' \
+	DOCKER_OPTS='--env CGO_ENABLED=$(CGO_ENABLED) --env GOOS=$(GOOS) --env GOARCH=$(GOARCH) $(foreach v,$(EXTRA_DOCKER_ENVS),--env $(v))' \
 	$(MAKE) app-via-docker
 
 app-via-docker-pure:
 	APP_SUFFIX='-pure' DOCKER_OPTS='--env CGO_ENABLED=0' $(MAKE) app-via-docker
 
 app-via-docker-linux-amd64:
+	EXTRA_DOCKER_ENVS='CC=/opt/cross-builder/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc' \
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(MAKE) app-via-docker-goos-goarch
 
-app-via-docker-linux-arm:
-	APP_SUFFIX='-linux-arm' \
-	DOCKER_OPTS='--env CGO_ENABLED=0 --env GOOS=linux --env GOARCH=arm --env GOARM=5' \
-	$(MAKE) app-via-docker
-
 app-via-docker-linux-arm64:
-	APP_SUFFIX='-linux-arm64' \
-	DOCKER_OPTS='--env CGO_ENABLED=1 --env GOOS=linux --env GOARCH=arm64 --env CC=/opt/cross-builder/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc' \
-	$(MAKE) app-via-docker
+	EXTRA_DOCKER_ENVS='CC=/opt/cross-builder/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc' \
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(MAKE) app-via-docker-goos-goarch
+
+app-via-docker-linux-arm:
+	EXTRA_DOCKER_ENVS='GOARM=5' \
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm $(MAKE) app-via-docker-goos-goarch
 
 app-via-docker-linux-ppc64le:
 	CGO_ENABLED=0 GOOS=linux GOARCH=ppc64le $(MAKE) app-via-docker-goos-goarch
@@ -146,37 +160,29 @@ app-via-docker-windows-amd64:
 
 package-via-docker-goarch:
 	APP_SUFFIX='-$(GOARCH)' \
-	DOCKER_OPTS='--env CGO_ENABLED=$(CGO_ENABLED) --env GOOS=linux --env GOARCH=$(GOARCH)' \
+	DOCKER_OPTS='--env CGO_ENABLED=$(CGO_ENABLED) --env GOOS=linux --env GOARCH=$(GOARCH) $(foreach v,$(EXTRA_DOCKER_ENVS),--env $(v))' \
 	$(MAKE) package-via-docker
-
-package-via-docker-goarch-arm64:
-	APP_SUFFIX='-arm64' \
-	DOCKER_OPTS='--env CGO_ENABLED=1 --env GOOS=linux --env GOARCH=arm64 --env CC=/opt/cross-builder/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc' \
-	$(MAKE) package-via-docker
-
-package-via-docker-goarch-cgo:
-	CGO_ENABLED=1 $(MAKE) package-via-docker-goarch
-
-package-via-docker-goarch-nocgo:
-	CGO_ENABLED=0 $(MAKE) package-via-docker-goarch
 
 package-via-docker-pure:
 	APP_SUFFIX='-pure' DOCKER_OPTS='--env CGO_ENABLED=0' $(MAKE) package-via-docker
 
 package-via-docker-amd64:
-	GOARCH=amd64 $(MAKE) package-via-docker-goarch-cgo
-
-package-via-docker-arm:
-	GOARCH=arm $(MAKE) package-via-docker-goarch-nocgo
+	EXTRA_DOCKER_ENVS='CC=/opt/cross-builder/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc' \
+	CO_ENABLED=1 GOARCH=amd64 $(MAKE) package-via-docker-goarch
 
 package-via-docker-arm64:
-	$(MAKE) package-via-docker-goarch-arm64
+	EXTRA_DOCKER_ENVS='CC=/opt/cross-builder/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc' \
+	CGO_ENABLED=1 GOARCH=arm64 $(MAKE) package-via-docker-goarch
+
+package-via-docker-arm:
+	EXTRA_DOCKER_ENVS='GOARM=5' \
+	CGO_ENABLED=0 GOARCH=arm $(MAKE) package-via-docker-goarch
 
 package-via-docker-ppc64le:
-	GOARCH=ppc64le $(MAKE) package-via-docker-goarch-nocgo
+	CGO_ENABLED=0 GOARCH=ppc64le $(MAKE) package-via-docker-goarch
 
 package-via-docker-386:
-	GOARCH=386 $(MAKE) package-via-docker-goarch-nocgo
+	CGO_ENABLED=0 GOARCH=386 $(MAKE) package-via-docker-goarch
 
 remove-docker-images:
 	docker image ls --format '{{.ID}}' | xargs docker image rm -f

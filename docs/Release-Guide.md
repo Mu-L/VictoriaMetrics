@@ -38,11 +38,6 @@ docker buildx create --use --name=qemu
 docker buildx inspect --bootstrap  
 ```
 
-For ARM arch (M1/M2 processors) additionally configure docker with preferred platform:
-```
-export DOCKER_DEFAULT_PLATFORM=linux/amd64
-```
-
 By default, docker on MacOS has limited amount of resources (CPU, mem) to use. 
 Bumping the limits may significantly improve build speed.
 
@@ -51,8 +46,8 @@ Bumping the limits may significantly improve build speed.
 1. Make sure all the changes are documented in [CHANGELOG.md](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/docs/CHANGELOG.md).
    Ideally, every change must be documented in the commit with the change. Alternatively, the change must be documented immediately
    after the commit, which adds the change.
-1. Make sure all the changes are synced between `master`, `cluster`, `enterprise-single-node` and `enteprise-cluster` branches.
-   Changes in these branches must be synced immediately after they are commited in at least a single branch.
+1. Make sure all the changes are synced between `master`, `cluster`, `enterprise-single-node` and `enterprise-cluster` branches.
+   Changes in these branches must be synced immediately after they are committed in at least a single branch.
 1. Make sure that the release branches have no security issues.
 1. Update release versions if needed in [SECURITY.md](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/SECURITY.md).
 1. Add `(available starting from v1.xx.y)` line to feature docs introduced in the upcoming release.
@@ -103,20 +98,6 @@ Bumping the limits may significantly improve build speed.
    by [opening and merging PR](https://github.com/VictoriaMetrics/ops/pull/58).
 1. Bump VictoriaMetrics version at `deployment/docker/docker-compose.yml` and at `deployment/docker/docker-compose-cluster.yml`.
 1. Follow the instructions in [release follow-up](https://github.com/VictoriaMetrics/VictoriaMetrics-enterprise/blob/master/Release-Guide.md).
-
-## Building snap package
-
- pre-requirements:
-
-* snapcraft binary, can be installed with commands:
-   for MacOS `brew install snapcraft` and [install multipass](https://discourse.ubuntu.com/t/installing-multipass-on-macos/8329),
-   for Ubuntu - `sudo snap install snapcraft --classic`
-* exported snapcraft login to `~/.snap/login.json` with `snapcraft export-login login.json && mkdir -p ~/.snap && mv login.json ~/.snap/`
-* already created release at github (it operates `git describe` version, so git tag must be annotated).
-
-1. checkout to the latest git tag for single-node version.
-1. execute `make release-snap` - it must build and upload snap package.
-1. promote release to current, if needed manually at release page [snapcraft-releases](https://snapcraft.io/victoriametrics/releases)
 
 ### Public Announcement
 

@@ -18,6 +18,7 @@ Begin your VictoriaMetrics Anomaly Detection journey with ease using our guides 
 - **Quickstart**: Check out how to get `vmanomaly` up and running [here](/anomaly-detection/QuickStart.html).
 - **Overview**: Find out how `vmanomaly` service operates [here](/anomaly-detection/Overview.html)
 - **Integration**: Integrate anomaly detection into your observability ecosystem. Get started [here](/anomaly-detection/guides/guide-vmanomaly-vmalert.html).
+- **Anomaly Detection Presets**: Enable anomaly detection on predefined set of indicators, that require frequently changing static thresholds for alerting. Find more information [here](/anomaly-detection/presets/).
 
 - **Installation Options**: Select the method that aligns with your technical requirements:
     - **Docker Installation**: Suitable for containerized environments. See [Docker guide](/anomaly-detection/Overview.html#run-vmanomaly-docker-container).
@@ -49,7 +50,7 @@ Got questions about VictoriaMetrics Anomaly Detection? Chances are, we've got th
 Dive into [our FAQ section](/anomaly-detection/FAQ) to find responses to common questions.
 
 ## Get in Touch
-We're eager to connect with you and tailor our solutions to your specific needs. Here's how you can engage with us:
+We are eager to connect with you and adapt our solutions to your specific needs. Here's how you can engage with us:
 * [Book a Demo](https://calendly.com/victoriametrics-anomaly-detection) to discover what our product can do.
 * Interested in exploring our [Enterprise features](https://victoriametrics.com/products/enterprise), including [Anomaly Detection](https://victoriametrics.com/products/enterprise/anomaly-detection)? [Request your trial license](https://victoriametrics.com/products/enterprise/trial/) today and take the first step towards advanced system observability.
 

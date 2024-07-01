@@ -30,6 +30,7 @@ Metrics Operator introduces.
 - [VMStaticScrape](./vmstaticscrape.md)
 - [VMSingle](./vmsingle.md)
 - [VMUser](./vmuser.md)
+- [VMScrapeConfig](./vmscrapeconfig.md)
 
 Here is the scheme of relations between the custom resources:
 
@@ -119,6 +120,7 @@ Page for every custom resource contains examples section:
 - [VMStaticScrape examples](./vmstaticscrape.md#examples)
 - [VMSingle examples](./vmsingle.md#examples)
 - [VMUser examples](./vmuser.md#examples)
+- [VMScrapeConfig examples](./vmscrapeconfig.md#examples)
 
 In addition, you can find examples of the custom resources for VIctoriMetrics operator in 
 the **[examples directory](https://github.com/VictoriaMetrics/operator/tree/master/config/examples) of operator repository**.
@@ -181,13 +183,13 @@ Operator supports following [Enterprise features for VictoriaMetrics components]
     - [Multiple retentions / Retention filters](./vmcluster.md#retention-filters)
     - [Advanced per-tenant statistic](./vmcluster.md#advanced-per-tenant-statistic)
     - [mTLS protection](./vmcluster.md#mtls-protection)
-    - [Backup atomation](./vmcluster.md#backup-atomation)
+    - [Backup automation](./vmcluster.md#backup-automation)
 - [VMRule Enterprise features](./vmrule.md#enterprise-features)
     - [Multitenancy](./vmrule.md#multitenancy)
 - [VMSingle Enterprise features](./vmsingle.md#enterprise-features)
     - [Downsampling](./vmsingle.md#downsampling)
     - [Retention filters](./vmsingle.md#retention-filters)
-    - [Backup atomation](./vmsingle.md#backup-atomation)
+    - [Backup automation](./vmsingle.md#backup-automation)
 - [VMUser Enterprise features](./vmuser.md#enterprise-features)
     - [IP Filters](./vmuser.md#ip-filters)
 

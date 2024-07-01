@@ -15,6 +15,8 @@ var benchOutputs = []string{
 	"total_prometheus",
 	"increase",
 	"increase_prometheus",
+	"rate_sum",
+	"rate_avg",
 	"count_series",
 	"count_samples",
 	"unique_samples",
@@ -90,7 +92,7 @@ func newBenchAggregators(outputs []string, pushFunc PushFunc) *Aggregators {
   outputs: [%s]
 `, strings.Join(outputsQuoted, ","))
 
-	a, err := newAggregatorsFromData([]byte(config), pushFunc, nil)
+	a, err := newAggregatorsFromData([]byte(config), pushFunc, Options{})
 	if err != nil {
 		panic(fmt.Errorf("unexpected error when initializing aggregators: %s", err))
 	}
